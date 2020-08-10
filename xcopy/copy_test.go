@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-var c *xCopy
+var c *XCopy
 
 func testStruct(t *testing.T) {
 	id := 1
