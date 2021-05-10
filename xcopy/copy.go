@@ -10,13 +10,16 @@ import (
 	"github.com/pkg/errors"
 )
 
+type XCopy interface {
+	// 结构体赋值方法【这里抽离是为了兼容已有逻辑，可以使用CopyF替代】
+	CopySF(dest, source interface{}) (err error)
+	// 通用的赋值方法
+	CopyF(dest, source interface{}) (err error)
+}
+
 // 字段赋值
 // 结构体赋值时对应字段可指定源的字段(`copy:"source's field"`)
-type XCopy struct {
-	// 赋值体
-	// 请使用SetSource方法
-	source interface{}
-
+type xCopy struct {
 	// 强制转换(慎用)
 	// 多级指针只有层级一致或者dv和sv最后都不再是指针才不会有问题
 	// Recursion时, 多级指针层级一致或者sv最后不再是指针才不会有问题
@@ -42,8 +45,8 @@ type XCopy struct {
 const OriginCopyField = "origin"
 
 // 初始化默认
-func NewCopy(opts ...Option) *XCopy {
-	c := &XCopy{
+func NewCopy(opts ...Option) *xCopy {
+	c := &xCopy{
 		convert:   true,
 		next:      true,
 		recursion: true,
@@ -61,9 +64,8 @@ func NewCopy(opts ...Option) *XCopy {
 }
 
 // 克隆
-func (c *XCopy) Clone() *XCopy {
-	return &XCopy{
-		source:    c.source,
+func (c *xCopy) Clone() *xCopy {
+	return &xCopy{
 		convert:   c.convert,
 		next:      c.next,
 		recursion: c.recursion,
@@ -75,42 +77,35 @@ func (c *XCopy) Clone() *XCopy {
 }
 
 // 是否强转
-func (c *XCopy) SetConvert(convert bool) *XCopy {
+func (c *xCopy) SetConvert(convert bool) *xCopy {
 	cp := c.Clone()
 	WithConvert(convert)(cp)
 	return cp
 }
 
 // 出错是否继续赋值下一个字段
-func (c *XCopy) SetNext(next bool) *XCopy {
+func (c *xCopy) SetNext(next bool) *xCopy {
 	cp := c.Clone()
 	WithNext(next)(cp)
 	return cp
 }
 
 // 是否递归（依赖强转）
-func (c *XCopy) SetRecursion(recursion bool) *XCopy {
+func (c *xCopy) SetRecursion(recursion bool) *xCopy {
 	cp := c.Clone()
 	WithRecursion(recursion)(cp)
 	return cp
 }
 
 // 是否读取JSON TAG
-func (c *XCopy) SetJSONTag(jsonTag bool) *XCopy {
+func (c *xCopy) SetJSONTag(jsonTag bool) *xCopy {
 	cp := c.Clone()
 	WithJsonTag(jsonTag)(cp)
 	return cp
 }
 
-// 设置源
-func (c *XCopy) SetSource(source interface{}) *XCopy {
-	cp := c.Clone()
-	WithSource(source)(cp)
-	return cp
-}
-
 // 重新定义赋值(带上dv的类型)
-func (c *XCopy) copySt(dv, sv reflect.Value) (err error) {
+func (c *xCopy) copySt(dv, sv reflect.Value) (err error) {
 	dt := dv.Type()
 	var (
 		fst    reflect.StructField
@@ -195,7 +190,7 @@ func (c *XCopy) copySt(dv, sv reflect.Value) (err error) {
 
 // 解析多级
 // 支持数组、map、结构体
-func (c *XCopy) parseMultiField(sfs []string, data *convertInfo) (aok bool) {
+func (c *xCopy) parseMultiField(sfs []string, data *convertInfo) (aok bool) {
 	defer func() {
 		if pe := recover(); pe != nil {
 			aok = false
@@ -235,7 +230,7 @@ func (c *XCopy) parseMultiField(sfs []string, data *convertInfo) (aok bool) {
 // 解析赋值字段
 // NOTE
 // 优先解析copy，然后解析json，因为按照规则和习惯，大部分的字段最终名与json后的字段名一致
-func (c *XCopy) parseTag(fst reflect.StructField) (string, bool) {
+func (c *xCopy) parseTag(fst reflect.StructField) (string, bool) {
 	// json -
 	// copy origin
 	sfi := strings.TrimSpace(fst.Tag.Get("copy"))
@@ -251,7 +246,7 @@ func (c *XCopy) parseTag(fst reflect.StructField) (string, bool) {
 }
 
 // 抽离函数，过滤不合法的字段
-func (c *XCopy) setSf(data *convertInfo) (err error) {
+func (c *xCopy) setSf(data *convertInfo) (err error) {
 	// 强制转换可能会出现异常
 	defer func() {
 		if pe := recover(); pe != nil {
@@ -295,7 +290,7 @@ func (c *XCopy) setSf(data *convertInfo) (err error) {
 
 // NOTE 复杂逻辑不符合预期: 递归结构体、多级指针
 // 抽离函数，真正的赋值操作
-func (c *XCopy) value(data *convertInfo) bool {
+func (c *xCopy) value(data *convertInfo) bool {
 	dt := data.dv.Type()
 	st := data.sv.Type()
 	// nil返回
@@ -369,7 +364,7 @@ func (c *XCopy) value(data *convertInfo) bool {
 }
 
 // 强制转换: 调用该方法的时候已经不再是指针
-func (c *XCopy) convertValue(data, nd *convertInfo) bool {
+func (c *xCopy) convertValue(data, nd *convertInfo) bool {
 	dt := nd.dv.Type()
 	sv := data.sv
 	nsv := nd.sv
@@ -386,7 +381,7 @@ func (c *XCopy) convertValue(data, nd *convertInfo) bool {
 }
 
 // 不递归进行指针赋值
-func (c *XCopy) notRecursion(data *convertInfo) bool {
+func (c *xCopy) notRecursion(data *convertInfo) bool {
 	dt := data.dv.Type()
 	st := data.sv.Type()
 	// 赋值指针(不申请内存拷贝)
@@ -420,7 +415,7 @@ func (c *XCopy) notRecursion(data *convertInfo) bool {
 }
 
 // 递归指针赋值
-func (c *XCopy) recursionPointer(data *convertInfo) (*convertInfo, bool) {
+func (c *xCopy) recursionPointer(data *convertInfo) (*convertInfo, bool) {
 	dt := data.dv.Type()
 	st := data.sv.Type()
 	malloc := false
@@ -466,7 +461,7 @@ func (c *XCopy) recursionPointer(data *convertInfo) (*convertInfo, bool) {
 }
 
 // 递归赋值数组
-func (c *XCopy) recursionSlice(data, nd *convertInfo) bool {
+func (c *xCopy) recursionSlice(data, nd *convertInfo) bool {
 	sl := data.sv.Len()
 	if sl == 0 {
 		return false
@@ -498,7 +493,7 @@ func (c *XCopy) recursionSlice(data, nd *convertInfo) bool {
 }
 
 // 递归结构体
-func (c *XCopy) recursionStruct(data, nd *convertInfo) bool {
+func (c *xCopy) recursionStruct(data, nd *convertInfo) bool {
 	err := c.copySt(nd.dv, data.sv)
 	if err != nil {
 		panic(errors.Wrap(err, "递归结构体赋值失败"))
@@ -512,8 +507,8 @@ func (c *XCopy) recursionStruct(data, nd *convertInfo) bool {
 // 为dest在source中存在的字段自动赋值
 // 结构体字段赋值函数
 // 通用请调用CopyF方法
-func (c *XCopy) CopySF(dest interface{}) (err error) {
-	if c.source == nil {
+func (c *xCopy) CopySF(dest, source interface{}) (err error) {
+	if source == nil {
 		return errors.New("赋值体不存在")
 	}
 	defer func() {
@@ -536,7 +531,7 @@ func (c *XCopy) CopySF(dest interface{}) (err error) {
 		return
 	}
 
-	sv := reflect.Indirect(reflect.ValueOf(c.source))
+	sv := reflect.Indirect(reflect.ValueOf(source))
 	// 赋值必须是指针类型
 	stKind := sv.Kind()
 	if stKind != reflect.Struct && stKind != reflect.Map {
@@ -549,8 +544,8 @@ func (c *XCopy) CopySF(dest interface{}) (err error) {
 
 // 单个赋值
 // 通用的赋值方法
-func (c *XCopy) CopyF(dest interface{}) (err error) {
-	if c.source == nil {
+func (c *xCopy) CopyF(dest, source interface{}) (err error) {
+	if source == nil {
 		return errors.New("赋值体不存在")
 	}
 	// 强制转换可能会出现异常
@@ -567,7 +562,7 @@ func (c *XCopy) CopyF(dest interface{}) (err error) {
 	}
 	// 真实数据
 	dv = dv.Elem()
-	sv := reflect.Indirect(reflect.ValueOf(c.source))
+	sv := reflect.Indirect(reflect.ValueOf(source))
 
 	// 重置数据
 	data := c.cp.Get().(*convertInfo)
